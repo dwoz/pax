@@ -1,4 +1,6 @@
 import io
+
+
 def parse_conf(name='conf'):
     conf = {}
     with io.open(name, 'r') as fp:

@@ -189,8 +189,6 @@ class ClientProtocol(asyncio.Protocol):
         self.transport.write(data)
 
 
-
-
 class DispatchProtocol(asyncio.Protocol):
 
     def __init__(self, server, peername=None, transport=None):
