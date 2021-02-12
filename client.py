@@ -35,37 +35,39 @@ class ServerClientProtocol(asyncio.Protocol):
         loop = asyncio.get_running_loop()
         self.reply = loop.create_future()
         data = json.dumps({'from': 'client', 'message': message}).encode()
-        log.info("Data sent: %r", data)
+        log.debug("Data sent: %r", data)
         self.transport.write(data)
         data = await self.reply
-        log.info("Data received: %r", data.decode())
+        log.debug("Data received: %r", data.decode())
         return data
 
-    async def propose(self, value):
+    async def propose(self, key, value):
         loop = asyncio.get_running_loop()
         self.reply = loop.create_future()
         data = json.dumps({
             'from': 'client',
             'action': 'propose',
+            'key': key,
             'value': value,
         }).encode()
-        log.info("Data sent: %r", data)
+        log.debug("Data sent: %r", data)
         self.transport.write(data)
         data = await self.reply
-        log.info("Data received: %r", data.decode())
+        log.debug("Data received: %r", data.decode())
         return data
 
-    async def query(self):
+    async def query(self, key):
         loop = asyncio.get_running_loop()
         self.reply = loop.create_future()
         data = json.dumps({
+            'key': key,
             'from': 'client',
             'action': 'query',
         }).encode()
-        log.info("Data sent: %r", data)
+        log.debug("Data sent: %r", data)
         self.transport.write(data)
         data = await self.reply
-        log.info("Data received: %r", data.decode())
+        log.debug("Data received: %r", data.decode())
         return data
 
 
@@ -93,7 +95,7 @@ class PaxClient:
         await on_con_made
         data = await protocol.send(message)
 
-    async def propose(self, value):
+    async def propose(self, key, value):
         loop = asyncio.get_running_loop()
         on_con_lost = loop.create_future()
         on_con_made = loop.create_future()
@@ -101,10 +103,10 @@ class PaxClient:
             lambda: ServerClientProtocol(on_con_lost, on_con_made),
             *self.addr)
         await on_con_made
-        data = await protocol.propose(value)
+        data = await protocol.propose(key, value)
         return data
 
-    async def query(self):
+    async def query(self, key):
         loop = asyncio.get_running_loop()
         on_con_lost = loop.create_future()
         on_con_made = loop.create_future()
@@ -112,28 +114,32 @@ class PaxClient:
             lambda: ServerClientProtocol(on_con_lost, on_con_made),
             *self.addr)
         await on_con_made
-        data = await protocol.query()
-        return data
+        data = await protocol.query(key)
+        return json.loads(data)['value']
 
 import argparse
 
 
 parser = argparse.ArgumentParser("Pax Client")
 parser.add_argument('peer_name')
+parser.add_argument('key') #, nargs='?', default=None)
 parser.add_argument('value', nargs='?', default=None)
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [client] %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s [client] %(levelname)s %(message)s")
     ns = parser.parse_args()
     conf = parse_conf()
     name = ns.peer_name
+    key = ns.key
     value = ns.value
+    log.debug("Name: %s Key: %s Value: %s", name, key, value)
     client = PaxClient(name, conf)
     if value is None:
-        await client.query()
+        value = await client.query(key)
+        print(value)
     else:
-        await client.propose(value)
+        await client.propose(key, value)
 
 
 asyncio.run(main())

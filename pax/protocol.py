@@ -27,7 +27,7 @@ class PeerClientProtocol(asyncio.Protocol):
         #log.info("Data sent: %r", self.message)
 
     def data_received(self, data):
-        log.info("Data received: %r", data.decode())
+        log.debug("Data received: %r", data.decode())
         msg = json.loads(data.decode())
         if 'action' in msg:
             if msg['action'] == 'grant':
@@ -41,7 +41,7 @@ class PeerClientProtocol(asyncio.Protocol):
                 fut.set_result((self.name, True))
 
     def connection_lost(self, exc):
-        log.info("The server closed the connection")
+        log.info("Peer %s closed the connection", name)
         self.connection_event.clear()
         self.on_con_lost.set_result(True)
 
@@ -100,10 +100,10 @@ class PeerProtocol(asyncio.Protocol):
 
     def data_received(self, data):
         message = json.loads(data.decode())
-        log.info("Data received: %r %r", self, message)
+        log.debug("Data received: %r %r", self, message)
         if 'action' in message:
             if message['action'] == 'permission':
-                log.warning("handle permission request %r", message)
+                log.debug("handle permission request %r", message)
                 sug_id = SuggestionId.parse(message['sug_id'])
                 if self.acceptor.should_grant(sug_id):
                     message = {
@@ -116,7 +116,7 @@ class PeerProtocol(asyncio.Protocol):
                 else:
                     log.warning("DOING NOTHING - should send NACK %r", message)
             elif message['action'] == 'proposal':
-                log.warning("handle proposal request %r", message)
+                log.debug("handle proposal request %r", message)
                 sug_id = SuggestionId.parse(message['sug_id'])
                 if self.acceptor.should_accept(sug_id):
                     value = message['value']
@@ -131,19 +131,23 @@ class PeerProtocol(asyncio.Protocol):
                     }
                     self.transport.write(json.dumps(message).encode())
             elif message['action'] == 'learn':
-                log.warning("handle learn request %r", message)
-                value = message['value']
+                log.debug("handle learn request %r", message)
                 learned_id = message['learned_id']
-                self.server.learner = Learner(value)
-                message = {
-                    'from': 'peer',
-                    'action': 'learned',
-                    'value': value,
-                    'learned_id': learned_id,
-                }
-                self.transport.write(json.dumps(message).encode())
+                key, value = message['value']
+                self.server.learner = Learner(message['value'])
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(self.server.table.set(key, value))
+                def task_done(task):
+                    message = {
+                        'from': 'peer',
+                        'action': 'learned',
+                        'value': value,
+                        'learned_id': learned_id,
+                    }
+                    self.transport.write(json.dumps(message).encode())
+                task.add_done_callback(task_done)
         else:
-            log.info("Send: %r %s", self.peername, message)
+            log.debug("Send: %r %s", self.peername, message)
             self.transport.write(data)
 
 
@@ -163,20 +167,23 @@ class ClientProtocol(asyncio.Protocol):
         message = json.loads(data.decode())
         if 'action' in message:
             if message['action'] == 'propose':
+                key = message['key']
                 value = message['value']
-                task = loop.create_task(self.server.propose(value))
+                task = loop.create_task(self.server.propose(key, value))
                 task.add_done_callback(self.send_propose_reply)
             elif message['action'] == 'query':
+                key = message['key']
                 data = json.dumps({
                     'last_accepted_id': str(self.server.last_accepted_id),
                     'last_accepted_value': self.server.last_accepted_value,
-                    'learned_value': self.server.learner.value
+                    'learned_value': self.server.learner.value,
+                    'value': self.server.table.get(key)
                 }).encode()
                 self.transport.write(data)
         else:
             # fall back to echo
-            log.info("Data received: %r %r", self, message)
-            log.info("Send: %r %s", self.peername, message)
+            log.debug("Data received: %r %r", self, message)
+            log.debug("Send: %r %s", self.peername, message)
             self.transport.write(data)
 
     def send_propose_reply(self, task):
@@ -225,7 +232,7 @@ class ConnectionServerProtocol(asyncio.Protocol):
         peername = transport.get_extra_info('peername')
         proto = DispatchProtocol(self.server, peername, transport)
         transport.set_protocol(proto)
-        log.info("Connection from %s", peername)
+        log.debug("Connection from %s", peername)
 
     def data_received(self, data):
         raise Exception("Not able to handle data")

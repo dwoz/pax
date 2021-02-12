@@ -3,7 +3,7 @@
 PIDS=()
 
 for id in $(cat ./conf |cut -d':' -f1); do
-   echo $id
+   #echo $id
    python server.py $id &
    PIDS[${#PIDS[@]}]=$!
 done
